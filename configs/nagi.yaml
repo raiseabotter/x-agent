@@ -19,8 +19,14 @@ autonomy:
 timing:
   cycle_interval_min_minutes: 8
   cycle_interval_max_minutes: 15
-  active_hours_start: 7      # JST
-  active_hours_end: 25       # 25 = 1am next day
+  # Human-like activity schedule (JST)
+  # Posts/tweets: only during waking hours (7-22)
+  # Likes: allowed slightly wider but reduced at night
+  active_hours_start: 7       # JST — wake up
+  active_hours_end: 22        # JST — wind down (no posts after 22:00)
+  night_like_hours_start: 22  # 22:00-23:59: occasional likes only (human winding down)
+  night_like_hours_end: 24
+  night_like_max_per_cycle: 1 # Max 1 like per cycle during night window
   min_delay_between_actions_seconds: 15
   post_interval_minutes: 180  # Spontaneous post every ~3 hours
 

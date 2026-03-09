@@ -193,6 +193,13 @@ class XAgent:
         interest_cfg = self._config.get("interest", {})
         max_per_cycle = interest_cfg.get("max_tweets_per_cycle", 5)
 
+        # Night mode: limit to likes only, reduced count
+        night_mode = self._is_night_mode()
+        if night_mode:
+            timing = self._config.get("timing", {})
+            max_per_cycle = int(timing.get("night_like_max_per_cycle", 1))
+            logger.info("Night mode active — likes only, max %d per cycle", max_per_cycle)
+
         # 4. Decide and act on top-N relevant tweets
         for tweet in relevant[:max_per_cycle]:
             if self._daily_actions_remaining() <= 0:
@@ -201,6 +208,10 @@ class XAgent:
             decision = await self._decide_action(tweet)
 
             if decision.get("action") == "ignore":
+                continue
+
+            # Night mode: only allow likes (no posts, replies, etc.)
+            if night_mode and decision.get("action") != "like":
                 continue
 
             # 5. Autonomy gate
@@ -223,8 +234,9 @@ class XAgent:
             min_delay = timing.get("min_delay_between_actions_seconds", 30)
             await asyncio.sleep(random.uniform(min_delay, min_delay * 4))
 
-        # 8. Spontaneous post check
-        await self._maybe_spontaneous_post(tweets)
+        # 8. Spontaneous post check (skip during night mode)
+        if not night_mode:
+            await self._maybe_spontaneous_post(tweets)
 
         return {"status": "ok", "actions_taken": len(self._cycle_actions)}
 
@@ -788,24 +800,46 @@ Output ONLY the tweet text — nothing else. No quotes, no explanation."""
 
         return max(0, max_actions - count)
 
-    def _is_active_hour(self) -> bool:
-        """Return True if current JST hour is within the configured active window."""
+    def _get_jst_hour(self) -> int:
+        """Return current hour in JST."""
         import zoneinfo  # Python 3.9+
-
-        timing = self._config.get("timing", {})
-        start = int(timing.get("active_hours_start", 8))
-        end = int(timing.get("active_hours_end", 24))
 
         try:
             jst = zoneinfo.ZoneInfo("Asia/Tokyo")
             now_jst = datetime.now(jst)
         except Exception:
-            # Fallback: assume UTC+9
             from datetime import timedelta
             now_jst = datetime.now(timezone.utc) + timedelta(hours=9)
 
-        hour = now_jst.hour
-        return start <= hour < end
+        return now_jst.hour
+
+    def _is_active_hour(self) -> bool:
+        """Return True if current JST hour is within daytime OR night-like window.
+
+        Daytime (active_hours_start to active_hours_end): full activity
+        Night-like window (night_like_hours_start to night_like_hours_end): likes only
+        Outside both: sleep (no activity at all)
+        """
+        timing = self._config.get("timing", {})
+        start = int(timing.get("active_hours_start", 7))
+        end = int(timing.get("active_hours_end", 22))
+        night_start = int(timing.get("night_like_hours_start", 22))
+        night_end = int(timing.get("night_like_hours_end", 24))
+
+        hour = self._get_jst_hour()
+        return start <= hour < end or night_start <= hour < night_end
+
+    def _is_night_mode(self) -> bool:
+        """Return True if in the night-like-only window (no posts, reduced likes)."""
+        timing = self._config.get("timing", {})
+        start = int(timing.get("active_hours_start", 7))
+        end = int(timing.get("active_hours_end", 22))
+        night_start = int(timing.get("night_like_hours_start", 22))
+        night_end = int(timing.get("night_like_hours_end", 24))
+
+        hour = self._get_jst_hour()
+        # Night mode: in night window but NOT in daytime window
+        return (night_start <= hour < night_end) and not (start <= hour < end)
 
     # ──────────────────────────────────────────
     # Pending actions helpers
