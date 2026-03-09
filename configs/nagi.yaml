@@ -5,23 +5,24 @@ log_file: "data/nagi_x_actions.jsonl"
 pending_file: "data/nagi_x_pending.json"
 
 autonomy:
-  level: "manual"           # manual / semi / full
+  level: "full"              # full: auto-approve if confidence >= threshold
   allowed_actions:
-    - "like"                # Start with like only
-  require_approval:
+    - "like"
     - "post"
     - "reply"
+  require_approval:
     - "quote"
     - "retweet"
-  max_actions_per_day: 5
-  confidence_threshold: 0.7  # For 'full' mode auto-approval
+  max_actions_per_day: 100   # ~6 likes/hr * 16h + posts
+  confidence_threshold: 0.6  # Lower threshold to allow more experimentation
 
 timing:
-  cycle_interval_min_minutes: 30
-  cycle_interval_max_minutes: 90
-  active_hours_start: 8     # JST
-  active_hours_end: 24
-  min_delay_between_actions_seconds: 30
+  cycle_interval_min_minutes: 8
+  cycle_interval_max_minutes: 15
+  active_hours_start: 7      # JST
+  active_hours_end: 25       # 25 = 1am next day
+  min_delay_between_actions_seconds: 15
+  post_interval_minutes: 180  # Spontaneous post every ~3 hours
 
 llm:
   provider: "anthropic"
@@ -36,5 +37,5 @@ browser:
   screenshot_on_error: true
 
 interest:
-  min_relevance_score: 0.3   # Minimum keyword match score to consider a tweet
-  max_tweets_per_cycle: 5    # Process top N relevant tweets per cycle
+  min_relevance_score: 0.2   # Lower to catch more coffee content
+  max_tweets_per_cycle: 6    # Up to 6 likes per cycle

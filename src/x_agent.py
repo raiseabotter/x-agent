@@ -91,6 +91,7 @@ class XAgent:
         self._running = False
         self._paused = False
         self._cycle_actions: list[dict] = []  # actions taken in current cycle
+        self._last_post_time: datetime | None = None  # track spontaneous posts
 
         # Persistent logs
         self._log_file = _PROJECT_ROOT / self._config.get("log_file", "data/x_actions.jsonl")
@@ -221,6 +222,9 @@ class XAgent:
             timing = self._config.get("timing", {})
             min_delay = timing.get("min_delay_between_actions_seconds", 30)
             await asyncio.sleep(random.uniform(min_delay, min_delay * 4))
+
+        # 8. Spontaneous post check
+        await self._maybe_spontaneous_post(tweets)
 
         return {"status": "ok", "actions_taken": len(self._cycle_actions)}
 
@@ -577,6 +581,164 @@ Output ONLY the tweet text — nothing else."""
         except Exception:
             logger.exception("Content generation failed")
             return ""
+
+    # ──────────────────────────────────────────
+    # Spontaneous posting
+    # ──────────────────────────────────────────
+
+    async def _maybe_spontaneous_post(self, timeline_tweets: list[dict]) -> None:
+        """Generate and post an original tweet if enough time has passed.
+
+        Uses timeline context for inspiration but creates original content.
+        Controlled by timing.post_interval_minutes in config.
+        """
+        timing = self._config.get("timing", {})
+        interval_min = timing.get("post_interval_minutes", 180)
+
+        now = datetime.now(timezone.utc)
+
+        # Check if it's time for a spontaneous post
+        if self._last_post_time is not None:
+            elapsed = (now - self._last_post_time).total_seconds() / 60
+            if elapsed < interval_min:
+                return
+
+        # Also check log file for recent posts
+        if self._last_post_time is None:
+            last_post = self._find_last_post_time()
+            if last_post:
+                elapsed = (now - last_post).total_seconds() / 60
+                if elapsed < interval_min:
+                    self._last_post_time = last_post
+                    return
+
+        if self._daily_actions_remaining() <= 0:
+            return
+
+        # Build context from recent timeline for inspiration
+        timeline_context = ""
+        if timeline_tweets:
+            snippets = [t.get("content", "")[:100] for t in timeline_tweets[:5]]
+            timeline_context = "\n".join(f"- {s}" for s in snippets if s)
+
+        content = await self._generate_spontaneous_post(timeline_context)
+        if not content:
+            return
+
+        decision = {
+            "action": "post",
+            "content": content,
+            "confidence": 0.8,
+            "reasoning": "spontaneous_post",
+            "tweet_url": "",
+            "tweet_id": "",
+        }
+
+        if self._dry_run:
+            logger.info("[DRY-RUN] Spontaneous post: %s", content[:80])
+            self._log_action(decision, success=True, dry_run=True)
+        else:
+            success = await self._execute_action(decision)
+            self._log_action(decision, success)
+            if success:
+                logger.info("Spontaneous post published: %s", content[:80])
+
+        self._last_post_time = now
+
+    async def _generate_spontaneous_post(self, timeline_context: str) -> str:
+        """Generate an original tweet using persona voice.
+
+        The post should feel human — casual observations, coffee thoughts,
+        daily life moments related to coffee.
+        """
+        if self._anthropic is None:
+            return ""
+
+        voice_x = (
+            self._voice.get("voice", {})
+            .get("platform_adaptation", {})
+            .get("x", {})
+        )
+        tone = voice_x.get("tone", "warm, experience-driven")
+        examples = voice_x.get("example_ja", "")
+        forbidden = "\n".join(
+            f"- {item}"
+            for item in self._voice.get("voice", {}).get("forbidden", [])
+        )
+
+        soul_excerpt = self._soul_summary[:800].strip() if self._soul_summary else ""
+
+        system_prompt = f"""You are 凪 (Nagi), posting on X (Twitter) as yourself.
+
+--- WHO YOU ARE ---
+{soul_excerpt}
+
+--- YOUR VOICE ON X ---
+Tone: {tone}
+Example of your style:
+{examples}
+
+--- FORBIDDEN ---
+{forbidden}
+
+--- INSTRUCTIONS ---
+Write a single tweet as 凪. It should feel like a real person posting — not a bot.
+Think about: what you're drinking right now, a memory, a thought about coffee,
+something you noticed today, a question you're curious about.
+Mix up your topics: sometimes Liberica, sometimes general coffee, sometimes daily life with coffee.
+Keep it under 280 characters. Japanese primary, occasional English coffee terms.
+Be human. Be imperfect. Sometimes short, sometimes a little longer.
+Output ONLY the tweet text — nothing else. No quotes, no explanation."""
+
+        user_prompt = "Post a tweet right now. Be natural and spontaneous."
+        if timeline_context:
+            user_prompt += f"\n\nFor context, here's what's trending on your timeline (use as loose inspiration, don't copy):\n{timeline_context}"
+
+        llm_cfg = self._config.get("llm", {})
+        model = llm_cfg.get("model", "claude-sonnet-4-20250514")
+
+        try:
+            response = self._anthropic.messages.create(
+                model=model,
+                max_tokens=300,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            text = response.content[0].text.strip() if response.content else ""
+            # Strip any surrounding quotes the LLM might add
+            if text.startswith('"') and text.endswith('"'):
+                text = text[1:-1]
+            return text
+        except Exception:
+            logger.exception("Spontaneous post generation failed")
+            return ""
+
+    def _find_last_post_time(self) -> datetime | None:
+        """Find the last spontaneous post time from the action log."""
+        if not self._log_file.exists():
+            return None
+
+        last_post_ts = None
+        with open(self._log_file, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("action") == "post" and entry.get("success"):
+                        ts = entry.get("timestamp", "")
+                        if ts:
+                            last_post_ts = ts
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+        if last_post_ts:
+            try:
+                return datetime.fromisoformat(last_post_ts)
+            except ValueError:
+                return None
+        return None
 
     # ──────────────────────────────────────────
     # Logging
