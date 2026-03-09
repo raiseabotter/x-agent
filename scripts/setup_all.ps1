@@ -56,20 +56,23 @@ if (Test-Path $cookieFile) {
     Write-Host "[OK] Cookie file already exists: $cookieFile" -ForegroundColor Green
     Write-Host "     Delete it and re-run to re-extract" -ForegroundColor Gray
 } else {
-    Write-Host "Attempting to extract cookies from Chrome Default profile..." -ForegroundColor Cyan
+    Write-Host "Auto-detecting browser and extracting cookies..." -ForegroundColor Cyan
     Write-Host "[NOTE] This will close Chrome temporarily!" -ForegroundColor Yellow
     $response = Read-Host "Continue? (y/n)"
     if ($response -eq 'y') {
-        python scripts/setup_cookies.py --from-chrome "Default" --cookie-file "data/nagi_x_cookies.json" 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "[WARN] Cookie extraction failed. Trying 'Profile 1'..." -ForegroundColor Yellow
-            python scripts/setup_cookies.py --from-chrome "Profile 1" --cookie-file "data/nagi_x_cookies.json" 2>&1
-        }
+        python scripts/setup_cookies.py --auto --cookie-file "data/nagi_x_cookies.json" 2>&1
         if (Test-Path $cookieFile) {
             Write-Host "[OK] Cookies extracted!" -ForegroundColor Green
         } else {
-            Write-Host "[ERROR] Cookie extraction failed. Run manually:" -ForegroundColor Red
-            Write-Host "  python scripts/setup_cookies.py --from-chrome ""Default"" --cookie-file data/nagi_x_cookies.json" -ForegroundColor Yellow
+            Write-Host "[WARN] Auto-detect failed. Trying manual login..." -ForegroundColor Yellow
+            Write-Host "A browser window will open. Log into X, then press Enter." -ForegroundColor Cyan
+            python scripts/setup_cookies.py --manual --cookie-file "data/nagi_x_cookies.json" 2>&1
+            if (Test-Path $cookieFile) {
+                Write-Host "[OK] Cookies extracted via manual login!" -ForegroundColor Green
+            } else {
+                Write-Host "[ERROR] Cookie extraction failed." -ForegroundColor Red
+                Write-Host "  Try: python scripts/setup_cookies.py --manual --cookie-file data/nagi_x_cookies.json" -ForegroundColor Yellow
+            }
         }
     } else {
         Write-Host "[SKIP] Cookie extraction skipped" -ForegroundColor Yellow
