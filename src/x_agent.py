@@ -326,7 +326,7 @@ class XAgent:
 
         # Attach tweet metadata
         decision["tweet_url"] = tweet.get("url", "")
-        decision["tweet_id"] = tweet.get("id", "")
+        decision["tweet_id"] = tweet.get("tweet_id", "")
         return decision
 
     def _build_system_prompt(
@@ -368,7 +368,7 @@ You must respond ONLY with a valid JSON object — no prose, no markdown fences.
     def _build_user_prompt(self, tweet: dict) -> str:
         """Build the LLM user prompt for a specific tweet."""
         author = tweet.get("author", "Unknown")
-        handle = tweet.get("handle", "")
+        handle = tweet.get("handle", "").lstrip("@")
         text = tweet.get("content", "")
 
         return f"""Evaluate this tweet and decide on an action.
