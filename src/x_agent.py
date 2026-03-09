@@ -73,8 +73,7 @@ class XAgent:
             self._browser: Any = XAgentBrowser(
                 cookie_file=cookie_file,
                 headless=browser_cfg.get("headless", True),
-                timeout_ms=browser_cfg.get("timeout_ms", 15000),
-                screenshot_on_error=browser_cfg.get("screenshot_on_error", True),
+                screenshots_dir=_PROJECT_ROOT / "data" / "screenshots",
             )
         except ImportError:
             logger.warning("src.x_agent_browser not found — browser operations will fail")
@@ -260,7 +259,7 @@ class XAgent:
 
         scored: list[tuple[float, dict]] = []
         for tweet in tweets:
-            text = (tweet.get("text", "") + " " + tweet.get("author", "")).lower()
+            text = (tweet.get("content", "") + " " + tweet.get("author", "")).lower()
             score = self._score_text(text)
             if score >= min_score:
                 scored.append((score, tweet))
@@ -370,7 +369,7 @@ You must respond ONLY with a valid JSON object — no prose, no markdown fences.
         """Build the LLM user prompt for a specific tweet."""
         author = tweet.get("author", "Unknown")
         handle = tweet.get("handle", "")
-        text = tweet.get("text", "")
+        text = tweet.get("content", "")
 
         return f"""Evaluate this tweet and decide on an action.
 
