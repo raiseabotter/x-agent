@@ -1,0 +1,40 @@
+codename: "nagi"
+persona_dir: "personas/nagi"
+cookie_file: "data/nagi_x_cookies.json"
+log_file: "data/nagi_x_actions.jsonl"
+pending_file: "data/nagi_x_pending.json"
+
+autonomy:
+  level: "manual"           # manual / semi / full
+  allowed_actions:
+    - "like"                # Start with like only
+  require_approval:
+    - "post"
+    - "reply"
+    - "quote"
+    - "retweet"
+  max_actions_per_day: 5
+  confidence_threshold: 0.7  # For 'full' mode auto-approval
+
+timing:
+  cycle_interval_min_minutes: 30
+  cycle_interval_max_minutes: 90
+  active_hours_start: 8     # JST
+  active_hours_end: 24
+  min_delay_between_actions_seconds: 30
+
+llm:
+  provider: "anthropic"
+  model: "claude-sonnet-4-20250514"
+  max_tokens_per_decision: 500
+  max_tokens_per_generation: 1000
+  # API key read from environment: ANTHROPIC_API_KEY
+
+browser:
+  headless: true
+  timeout_ms: 15000
+  screenshot_on_error: true
+
+interest:
+  min_relevance_score: 0.3   # Minimum keyword match score to consider a tweet
+  max_tweets_per_cycle: 5    # Process top N relevant tweets per cycle

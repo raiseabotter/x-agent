@@ -1,0 +1,28 @@
+# Data (cookies, logs, screenshots — NEVER commit)
+data/*.json
+data/*.jsonl
+data/logs/
+data/screenshots/
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
