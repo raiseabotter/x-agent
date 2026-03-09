@@ -406,13 +406,19 @@ class XAgentBrowser:
             self._sync_human_type_blocking(_SEL_COMPOSE_AREA, text)
             self._sync_human_pause_blocking("before_post")
 
-            submit_btn = self._page.query_selector(_SEL_SUBMIT_BTN)
+            # Try multiple submit button selectors (dialog vs inline)
+            submit_btn = (
+                self._page.query_selector('[data-testid="tweetButton"]')
+                or self._page.query_selector(_SEL_SUBMIT_BTN)
+            )
             if not submit_btn:
                 logger.warning("post_tweet: submit button not found")
                 self._sync_screenshot("post_no_submit")
                 return False
 
-            submit_btn.click()
+            # Wait for button to become enabled (text needs to be registered)
+            self._page.wait_for_timeout(1500)
+            submit_btn.click(timeout=15_000)
             self._page.wait_for_timeout(int(random.uniform(1000, 2000)))
             self._last_action_ts = time.monotonic()
             logger.info("post_tweet: posted tweet")

@@ -9,8 +9,8 @@ autonomy:
   allowed_actions:
     - "like"
     - "post"
-    - "reply"
   require_approval:
+    - "reply"
     - "quote"
     - "retweet"
   max_actions_per_day: 100   # ~6 likes/hr * 16h + posts
