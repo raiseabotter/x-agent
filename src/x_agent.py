@@ -362,6 +362,10 @@ class XAgent:
 
         soul_excerpt = self._soul_summary[:600].strip() if self._soul_summary else ""
 
+        # Optional per-persona addendum (supplements the 600-char soul excerpt)
+        addendum = self._config.get("llm", {}).get("system_prompt_addendum", "").strip()
+        addendum_block = f"\n\n--- PERSONA ADDENDUM ---\n{addendum}" if addendum else ""
+
         return f"""You are an autonomous social media agent acting as the persona described below.
 
 --- PERSONA SUMMARY ---
@@ -376,7 +380,7 @@ Format guidance: {style_guide}
 
 --- AUTONOMY RULES ---
 You may autonomously perform these actions (no approval needed): {', '.join(allowed_actions)}
-These actions require human approval before execution: {', '.join(require_approval)}
+These actions require human approval before execution: {', '.join(require_approval)}{addendum_block}
 
 Your role is to evaluate a tweet and decide whether and how to engage.
 You must respond ONLY with a valid JSON object — no prose, no markdown fences."""
@@ -559,6 +563,14 @@ Respond with exactly this JSON structure:
 
         soul_excerpt = self._soul_summary[:400].strip() if self._soul_summary else ""
 
+        # Optional per-persona addendum
+        addendum = self._config.get("llm", {}).get("system_prompt_addendum", "").strip()
+        addendum_block = f"\n\n--- PERSONA ADDENDUM ---\n{addendum}" if addendum else ""
+
+        # Determine language from voice config
+        lang = self._voice.get("voice", {}).get("primary_language", "ja")
+        lang_instruction = "Write in Japanese (primary)." if lang == "ja" else f"Write in {lang}."
+
         system_prompt = f"""You are writing as the following persona for X (Twitter).
 
 --- PERSONA ---
@@ -571,9 +583,9 @@ Respond with exactly this JSON structure:
 {example}
 
 --- FORBIDDEN ---
-{forbidden}
+{forbidden}{addendum_block}
 
-Write in Japanese (primary). Max 280 characters. No markdown.
+{lang_instruction} Max 280 characters. No markdown.
 Output ONLY the tweet text — nothing else."""
 
         user_prompt = f"Action type: {action_type}\nContext:\n{context}"
