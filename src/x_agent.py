@@ -93,6 +93,10 @@ class XAgent:
         self._cycle_actions: list[dict] = []  # actions taken in current cycle
         self._last_post_time: datetime | None = None  # track spontaneous posts
 
+        # Challenge / CAPTCHA auto-pause
+        self._consecutive_challenges = 0
+        self._challenge_pause_threshold = 2  # auto-pause after N consecutive challenges
+
         # Persistent logs
         self._log_file = _PROJECT_ROOT / self._config.get("log_file", "data/x_actions.jsonl")
         self._pending_file = _PROJECT_ROOT / self._config.get(
@@ -134,10 +138,16 @@ class XAgent:
 
         try:
             while self._running:
-                if not self._paused and self._is_active_hour():
+                if self._paused:
+                    logger.debug("Agent paused — skipping cycle")
+                elif self._is_active_hour():
                     try:
                         result = await self._run_cycle()
-                        logger.info("Cycle complete: %s", result.get("status"))
+                        status = result.get("status", "")
+                        logger.info("Cycle complete: %s", status)
+
+                        # Challenge detection: check browser state after cycle
+                        await self._check_challenge_state(result)
                     except Exception:
                         logger.exception("Cycle raised an unhandled error")
 
@@ -163,6 +173,50 @@ class XAgent:
         """Resume after pause."""
         logger.info("XAgent resumed")
         self._paused = False
+        self._consecutive_challenges = 0
+
+    # ──────────────────────────────────────────
+    # Challenge / CAPTCHA detection
+    # ──────────────────────────────────────────
+
+    async def _check_challenge_state(self, cycle_result: dict) -> None:
+        """Check if the browser hit a CAPTCHA / challenge and auto-pause if needed.
+
+        Called after each cycle. Uses the browser's check_for_challenge() to
+        detect URL redirects or CAPTCHA elements. If consecutive challenges
+        exceed the threshold, the agent auto-pauses to avoid triggering
+        further bot detection.
+        """
+        if self._browser is None:
+            return
+
+        challenge = await self._browser.check_for_challenge()
+        if challenge["challenged"]:
+            self._consecutive_challenges += 1
+            logger.warning(
+                "Challenge detected (%d/%d): type=%s url=%s",
+                self._consecutive_challenges,
+                self._challenge_pause_threshold,
+                challenge["challenge_type"],
+                challenge["url"],
+            )
+
+            if self._consecutive_challenges >= self._challenge_pause_threshold:
+                logger.warning(
+                    "AUTO-PAUSE: %d consecutive challenges detected. "
+                    "Session may be flagged — pausing agent to prevent escalation. "
+                    "Cookie refresh required to resume.",
+                    self._consecutive_challenges,
+                )
+                self._paused = True
+        else:
+            # Successful cycle — reset counter
+            if self._consecutive_challenges > 0:
+                logger.info(
+                    "Challenge cleared — resetting counter (was %d)",
+                    self._consecutive_challenges,
+                )
+            self._consecutive_challenges = 0
 
     # ──────────────────────────────────────────
     # Core cycle
@@ -880,6 +934,7 @@ Output ONLY the tweet text — nothing else. No quotes, no explanation."""
             "codename": self._config.get("codename", "?"),
             "running": self._running,
             "paused": self._paused,
+            "consecutive_challenges": self._consecutive_challenges,
             "daily_actions_remaining": self._daily_actions_remaining(),
             "autonomy_level": self._config.get("autonomy", {}).get("level", "manual"),
             "pending_count": len(self.get_pending_actions()),

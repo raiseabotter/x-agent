@@ -56,6 +56,19 @@ _MIN_ACTION_INTERVAL_S: float = 30.0
 _WAIT_TIMEOUT_MS = 10_000
 
 # ---------------------------------------------------------------------------
+# Challenge / CAPTCHA detection patterns
+# ---------------------------------------------------------------------------
+
+# URL patterns that indicate X has challenged the session
+_CHALLENGE_URL_PATTERNS = (
+    "account/access",
+    "account/login_challenge",
+    "i/flow/consent",
+    "i/flow/login",
+    "account/login_verification",
+)
+
+# ---------------------------------------------------------------------------
 # DOM selectors
 # ---------------------------------------------------------------------------
 
@@ -237,6 +250,61 @@ class XAgentBrowser:
             logger.debug("XAgentBrowser cleanup error", exc_info=True)
 
     # ------------------------------------------------------------------
+    # Challenge / CAPTCHA detection
+    # ------------------------------------------------------------------
+
+    async def check_for_challenge(self) -> dict:
+        """Check if the current page indicates a CAPTCHA or session challenge.
+
+        Returns:
+            dict with keys:
+              challenged (bool): True if a challenge was detected
+              challenge_type (str): type of challenge ("url_redirect", "captcha_element", "none")
+              url (str): current page URL
+        """
+        return await asyncio.to_thread(self._sync_check_for_challenge)
+
+    def _sync_check_for_challenge(self) -> dict:
+        """Synchronous challenge check."""
+        result = {"challenged": False, "challenge_type": "none", "url": ""}
+        if self._page is None:
+            return result
+
+        try:
+            current_url = self._page.url or ""
+            result["url"] = current_url
+
+            # Check URL patterns
+            url_lower = current_url.lower()
+            for pattern in _CHALLENGE_URL_PATTERNS:
+                if pattern in url_lower:
+                    result["challenged"] = True
+                    result["challenge_type"] = "url_redirect"
+                    return result
+
+            # Check for CAPTCHA-like elements on page
+            captcha_selectors = [
+                'iframe[src*="captcha"]',
+                'iframe[src*="challenge"]',
+                '[data-testid="arkose_iframe"]',
+                '#arkoseFrame',
+            ]
+            for sel in captcha_selectors:
+                try:
+                    el = self._page.query_selector(sel)
+                    if el:
+                        result["challenged"] = True
+                        result["challenge_type"] = "captcha_element"
+                        return result
+                except Exception:
+                    pass
+
+        except Exception:
+            logger.debug("_sync_check_for_challenge: exception", exc_info=True)
+
+        return result
+
+    # ------------------------------------------------------------------
     # Public actions
     # ------------------------------------------------------------------
 
@@ -254,6 +322,19 @@ class XAgentBrowser:
         page = self._page
         try:
             page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=20_000)
+
+            # Challenge detection: check if X redirected to a challenge page
+            challenge = self._sync_check_for_challenge()
+            if challenge["challenged"]:
+                logger.warning(
+                    "read_home_feed: CHALLENGE DETECTED (%s) — url=%s",
+                    challenge["challenge_type"],
+                    challenge["url"],
+                )
+                self._sync_screenshot("challenge_detected")
+                # Return empty with a marker that the caller can check
+                return []
+
             try:
                 page.wait_for_selector(_SEL_TWEET_ARTICLE, timeout=_WAIT_TIMEOUT_MS)
             except Exception:
