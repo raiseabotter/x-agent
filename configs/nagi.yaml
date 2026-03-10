@@ -17,8 +17,8 @@ autonomy:
   confidence_threshold: 0.6  # Lower threshold to allow more experimentation
 
 timing:
-  cycle_interval_min_minutes: 8
-  cycle_interval_max_minutes: 15
+  cycle_interval_min_minutes: 12
+  cycle_interval_max_minutes: 25
   # Human-like activity schedule (JST)
   # Posts/tweets: only during waking hours (7-22)
   # Likes: allowed slightly wider but reduced at night
@@ -27,7 +27,7 @@ timing:
   night_like_hours_start: 22  # 22:00-23:59: occasional likes only (human winding down)
   night_like_hours_end: 24
   night_like_max_per_cycle: 1 # Max 1 like per cycle during night window
-  min_delay_between_actions_seconds: 15
+  min_delay_between_actions_seconds: 30
   post_interval_minutes: 180  # Spontaneous post every ~3 hours
 
 llm:
@@ -43,5 +43,5 @@ browser:
   screenshot_on_error: true
 
 interest:
-  min_relevance_score: 0.2   # Lower to catch more coffee content
-  max_tweets_per_cycle: 6    # Up to 6 likes per cycle
+  min_relevance_score: 0.3   # Moderate threshold — quality over quantity
+  max_tweets_per_cycle: 3    # Max 3 actions per cycle (human-like restraint)

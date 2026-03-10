@@ -126,19 +126,73 @@ class XAgentBrowser:
         logger.info("XAgentBrowser started (headless=%s)", self._headless)
 
     def _sync_start(self) -> None:
-        """Synchronous portion of start() — runs in a thread."""
+        """Synchronous portion of start() — runs in a thread.
+
+        Uses persistent context to retain localStorage/sessionStorage/IndexedDB
+        across restarts, making the browser look like a returning user rather
+        than a fresh automation session.
+
+        Stealth measures:
+        - Hide navigator.webdriver flag
+        - Modern Chrome UA matching actual Playwright Chromium version
+        - Japanese locale/timezone to match persona
+        - Chromium launch args to disable automation signals
+        """
         self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=self._headless)
-        self._context = self._browser.new_context(
+
+        # Persistent user-data directory (survives restarts)
+        user_data_dir = self._cookie_file.parent.parent / "data" / "browser_profile"
+        user_data_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use persistent context (not launch + new_context)
+        self._context = self._pw.chromium.launch_persistent_context(
+            user_data_dir=str(user_data_dir),
+            headless=self._headless,
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             ),
-            viewport={"width": 1280, "height": 900},
+            viewport={"width": 1366, "height": 768},
+            locale="ja-JP",
+            timezone_id="Asia/Tokyo",
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ],
         )
+        # For persistent context, browser is not a separate object
+        self._browser = None
         self._context.set_default_timeout(_WAIT_TIMEOUT_MS)
 
-        # Load cookies
+        # Stealth: inject script BEFORE any page navigation to hide automation
+        self._context.add_init_script("""
+            // Hide navigator.webdriver
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+            // Override navigator.plugins to look real
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5],
+            });
+
+            // Override navigator.languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['ja-JP', 'ja', 'en-US', 'en'],
+            });
+
+            // Override Chrome runtime
+            window.chrome = { runtime: {} };
+
+            // Override permissions query
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) =>
+                parameters.name === 'notifications'
+                    ? Promise.resolve({ state: Notification.permission })
+                    : originalQuery(parameters);
+        """)
+
+        # Load cookies (supplement persistent context with explicit cookies)
         if self._cookie_file.exists():
             try:
                 cookies = json.loads(self._cookie_file.read_text(encoding="utf-8"))
