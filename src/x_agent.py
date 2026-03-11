@@ -159,6 +159,14 @@ class XAgent:
 
         try:
             while self._running:
+                # Diary generation runs regardless of active hours
+                # (no X interaction, just LLM + file write)
+                if self._memory:
+                    try:
+                        self._memory.maybe_generate_diary()
+                    except Exception:
+                        logger.exception("Diary generation failed")
+
                 if self._paused:
                     logger.debug("Agent paused — skipping cycle")
                 elif self._is_active_hour():
@@ -251,9 +259,9 @@ class XAgent:
         """
         self._cycle_actions = []
 
-        # 0. Memory: check if diary needs generation + reset cycle counter
+        # 0. Memory: reset per-cycle observation counter
+        # (diary generation moved to main loop — runs outside active hours too)
         if self._memory:
-            self._memory.maybe_generate_diary()
             self._memory.reset_cycle_counter()
 
         # 1. Read home timeline
