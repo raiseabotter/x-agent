@@ -115,6 +115,27 @@ class XAgent:
         self._moderate_interest_kw: list[str] = [k.lower() for k in kw.get("moderate_interest", [])]
         self._ignore_kw: list[str] = [k.lower() for k in kw.get("ignore", [])]
 
+        # Memory & Drift system
+        mem_cfg = self._config.get("memory", {})
+        if mem_cfg.get("enabled", True):
+            try:
+                from src.nagi_memory import NagiMemory
+                self._memory: Any = NagiMemory(
+                    data_dir=_PROJECT_ROOT / "data",
+                    persona_name=self._config.get("codename", "nagi"),
+                    anthropic_client=self._anthropic,
+                    llm_model=self._config.get("llm", {}).get("model", "claude-sonnet-4-20250514"),
+                    memory_days=mem_cfg.get("inject_days", 5),
+                    max_obs_per_cycle=mem_cfg.get("max_obs_per_cycle", 3),
+                    diary_max_tokens=mem_cfg.get("diary_max_tokens", 400),
+                    high_interest_kw=self._high_interest_kw,
+                )
+            except ImportError:
+                logger.warning("nagi_memory not available — memory system disabled")
+                self._memory = None
+        else:
+            self._memory = None
+
     # ──────────────────────────────────────────
     # Lifecycle
     # ──────────────────────────────────────────
@@ -230,6 +251,11 @@ class XAgent:
         """
         self._cycle_actions = []
 
+        # 0. Memory: check if diary needs generation + reset cycle counter
+        if self._memory:
+            self._memory.maybe_generate_diary()
+            self._memory.reset_cycle_counter()
+
         # 1. Read home timeline
         tweets = await self._read_timeline()
         if not tweets:
@@ -253,6 +279,11 @@ class XAgent:
             timing = self._config.get("timing", {})
             max_per_cycle = int(timing.get("night_like_max_per_cycle", 1))
             logger.info("Night mode active — likes only, max %d per cycle", max_per_cycle)
+
+        # 3b. Record what Nagi noticed this cycle (top 3)
+        if self._memory:
+            for t in relevant[:3]:
+                self._memory.record_observation({"action": "saw", "reasoning": ""}, t)
 
         # 4. Decide and act on top-N relevant tweets
         for tweet in relevant[:max_per_cycle]:
@@ -282,6 +313,10 @@ class XAgent:
             success = await self._execute_action(decision)
             self._log_action(decision, success)
             self._cycle_actions.append({"decision": decision, "success": success})
+
+            # Record to memory
+            if success and self._memory:
+                self._memory.record_observation(decision, tweet)
 
             # 7. Human-like pause between actions
             timing = self._config.get("timing", {})
@@ -420,6 +455,11 @@ class XAgent:
         addendum = self._config.get("llm", {}).get("system_prompt_addendum", "").strip()
         addendum_block = f"\n\n--- PERSONA ADDENDUM ---\n{addendum}" if addendum else ""
 
+        # Memory block (recent diary entries for drift)
+        memory_block = ""
+        if self._memory:
+            memory_block = self._memory.get_memory_block()
+
         return f"""You are an autonomous social media agent acting as the persona described below.
 
 --- PERSONA SUMMARY ---
@@ -434,7 +474,7 @@ Format guidance: {style_guide}
 
 --- AUTONOMY RULES ---
 You may autonomously perform these actions (no approval needed): {', '.join(allowed_actions)}
-These actions require human approval before execution: {', '.join(require_approval)}{addendum_block}
+These actions require human approval before execution: {', '.join(require_approval)}{addendum_block}{memory_block}
 
 Your role is to evaluate a tweet and decide whether and how to engage.
 You must respond ONLY with a valid JSON object — no prose, no markdown fences."""
@@ -720,6 +760,8 @@ Output ONLY the tweet text — nothing else."""
             self._log_action(decision, success)
             if success:
                 logger.info("Spontaneous post published: %s", content[:80])
+                if self._memory:
+                    self._memory.record_post(content)
 
         self._last_post_time = now
 
@@ -746,6 +788,11 @@ Output ONLY the tweet text — nothing else."""
 
         soul_excerpt = self._soul_summary[:800].strip() if self._soul_summary else ""
 
+        # Memory block for drift
+        memory_block = ""
+        if self._memory:
+            memory_block = self._memory.get_memory_block()
+
         system_prompt = f"""You are 凪 (Nagi), posting on X (Twitter) as yourself.
 
 --- WHO YOU ARE ---
@@ -757,13 +804,15 @@ Example of your style:
 {examples}
 
 --- FORBIDDEN ---
-{forbidden}
+{forbidden}{memory_block}
 
 --- INSTRUCTIONS ---
 Write a single tweet as 凪. It should feel like a real person posting — not a bot.
 Think about: what you're drinking right now, a memory, a thought about coffee,
 something you noticed today, a question you're curious about.
 Mix up your topics: sometimes Liberica, sometimes general coffee, sometimes daily life with coffee.
+If your memory shows you've posted about the same topic multiple days in a row,
+deliberately explore a different angle or a different topic this time.
 Keep it under 280 characters. Japanese primary, occasional English coffee terms.
 Be human. Be imperfect. Sometimes short, sometimes a little longer.
 Output ONLY the tweet text — nothing else. No quotes, no explanation."""

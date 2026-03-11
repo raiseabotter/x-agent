@@ -45,3 +45,9 @@ browser:
 interest:
   min_relevance_score: 0.3   # Moderate threshold — quality over quantity
   max_tweets_per_cycle: 3    # Max 3 actions per cycle (human-like restraint)
+
+memory:
+  enabled: true
+  inject_days: 5             # How many diary days to inject into prompts
+  max_obs_per_cycle: 3       # Max observations to record per cycle
+  diary_max_tokens: 400      # LLM budget for diary generation
