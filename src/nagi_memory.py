@@ -98,7 +98,7 @@ class NagiMemory:
         handle = ""
         if tweet:
             text_snippet = (tweet.get("content", "") or "")[:120]
-            handle = tweet.get("handle", "") or ""
+            handle = (tweet.get("handle", "") or "").lstrip("@")
 
         # Extract topic tags from text using keyword matching
         topic_tags = self._extract_topics(text_snippet)
